@@ -43,3 +43,7 @@ coverage.xml
 .vscode/
 *.swp
 *.swo
+
+# datasets
+data/**/preprocessed/*
+data/**/raw/*
