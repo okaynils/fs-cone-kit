@@ -10,4 +10,5 @@ dependencies = [
     "opencv-python>=4.13.0.92",
     "tqdm>=4.67.3",
     "ultralytics>=8.4.19",
+    "wandb>=0.25.0",
 ]

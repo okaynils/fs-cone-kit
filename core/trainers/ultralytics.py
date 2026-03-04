@@ -17,8 +17,9 @@ class UltralyticsTrainer(BaseTrainer):
         self.train_args["name"] = "yolo_run"
 
         if callbacks:
-            for event, func in callbacks.items():
-                self.model.add_callback(event, func)
+            for event, func_list in callbacks.items():
+                for func in func_list:
+                    self.model.add_callback(event, func)
                 
         print(f"[{self.__class__.__name__}] MLflow Experiment: '{experiment_name}' | Run: '{run_name}'")
 

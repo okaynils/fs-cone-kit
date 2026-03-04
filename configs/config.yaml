@@ -1,12 +1,17 @@
 defaults:
   - trainer: ultralytics
   - dataset: fsoco
-  - logger: gitlab
   - _self_
 
 model:
   name: "yolo11n"
   weights: "yolo11n.pt"
+
+loggers:
+#  gitlab:
+#    _target_: core.loggers.gitlab_mlflow.GitLabMLflowLogger
+  wandb:
+    _target_: core.loggers.wandb.WandBLogger
 
 run_name: "${model.name}_${now:%Y%m%d_%H%M%S}"
 

@@ -1,0 +1,1 @@
+_target_: core.loggers.wandb_logger.WandBLogger
