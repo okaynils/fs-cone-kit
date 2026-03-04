@@ -1,0 +1,7 @@
+defaults:
+  - trainer: ultralytics
+  - dataset: fsoco
+  - _self_
+
+model:
+  name: "yolo11n.pt"

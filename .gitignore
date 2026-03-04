@@ -47,3 +47,8 @@ coverage.xml
 # datasets
 data/**/preprocessed/*
 data/**/raw/*
+
+# model weights, checkpints and logs
+*.ckpt
+*.pt
+outputs/

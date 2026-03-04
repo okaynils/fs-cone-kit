@@ -1,0 +1,15 @@
+_target_: core.data.fsoco.FSOCODataset
+download_url: "http://fsoco.cs.uni-freiburg.de/src/download_boxes_train.php"
+raw_dir: "data/fsoco/raw"
+preprocessed_dir: "data/fsoco/preprocessed"
+
+debug_mode: true
+train_limit: 150
+val_limit: 20
+
+class_map:
+  blue_cone: 0
+  yellow_cone: 1
+  orange_cone: 2
+  large_orange_cone: 3
+  unknown_cone: 4
