@@ -1,7 +1,15 @@
 defaults:
   - trainer: ultralytics
   - dataset: fsoco
+  - logger: gitlab
   - _self_
 
 model:
-  name: "yolo11n.pt"
+  name: "yolo11n"
+  weights: "yolo11n.pt"
+
+run_name: "${model.name}_${now:%Y%m%d_%H%M%S}"
+
+hydra:
+  run:
+    dir: outputs/${run_name}
