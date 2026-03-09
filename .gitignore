@@ -53,3 +53,4 @@ data/**/raw/*
 *.pt
 outputs/
 wandb/
+runs/
