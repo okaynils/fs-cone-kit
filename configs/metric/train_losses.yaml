@@ -1,0 +1,3 @@
+_target_: core.metrics.ultralytics.UltralyticsTrainLossMetric
+
+prefix: train

@@ -44,6 +44,10 @@ coverage.xml
 *.swp
 *.swo
 
+# clankers
+.codex*
+.claude*
+
 # datasets
 data/**/preprocessed/*
 data/**/raw/*

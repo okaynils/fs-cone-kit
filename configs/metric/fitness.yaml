@@ -1,0 +1,3 @@
+_target_: core.metrics.ultralytics.UltralyticsFitnessMetric
+
+include_best_fitness: true

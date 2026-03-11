@@ -1,9 +1,17 @@
 from abc import ABC, abstractmethod
 
-class BaseLogger(ABC):
+from core.metrics.mixins import MetricsMixin
+
+
+class BaseLogger(MetricsMixin, ABC):
+    uses_mlflow = False
+
+    def __init__(self, metrics=None, **kwargs):
+        super().__init__(metrics=metrics)
+
     @abstractmethod
-    def setup(self, val_image_dir: str, class_map: dict):
-        """Initializes the logger with necessary dataset info."""
+    def setup(self, val_image_dir: str, class_map: dict, experiment_name: str, run_name: str):
+        """Initialize the logger with dataset, run, and metric configuration."""
         pass
 
     @abstractmethod

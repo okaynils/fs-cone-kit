@@ -1,6 +1,10 @@
 defaults:
   - trainer: ultralytics
   - dataset: fsoco
+  - metric/train_losses@metrics.train_losses
+  - metric/learning_rates@metrics.learning_rates
+  - metric/validation@metrics.validation
+  - metric/fitness@metrics.fitness
   - _self_
 
 model:
@@ -8,8 +12,8 @@ model:
   weights: "yolo11n.pt"
 
 loggers:
-#  gitlab:
-#    _target_: core.loggers.gitlab_mlflow.GitLabMLflowLogger
+  #gitlab:
+  #  _target_: core.loggers.gitlab_mlflow.GitLabMLflowLogger
   wandb:
     _target_: core.loggers.wandb.WandBLogger
 

@@ -1,4 +1,5 @@
 import os
+import re
 import cv2
 import numpy as np
 import mlflow
@@ -8,9 +9,21 @@ from ultralytics import YOLO
 from core.loggers.base import BaseLogger
 
 class GitLabMLflowLogger(BaseLogger):
-    def __init__(self, **kwargs):
+    uses_mlflow = True
+
+    def __init__(self, tracking_uri: str | None = None, **kwargs):
+        super().__init__(**kwargs)
         self.val_image_path = None
         self.reverse_class_map = None
+        self.tracking_uri = tracking_uri
+
+    @staticmethod
+    def _normalize_tracking_uri(tracking_uri: str) -> str:
+        if re.match(r"^[a-zA-Z]:[\\/]", tracking_uri):
+            return Path(tracking_uri).resolve().as_uri()
+        if "://" in tracking_uri:
+            return tracking_uri
+        return Path(tracking_uri).resolve().as_uri()
 
     def setup(self, val_image_dir: str, class_map: dict, experiment_name: str, run_name: str):
         self.reverse_class_map = {v: k for k, v in class_map.items()}
@@ -18,7 +31,23 @@ class GitLabMLflowLogger(BaseLogger):
         val_images = list(Path(val_image_dir).glob("*.jpg"))
         if val_images:
             self.val_image_path = str(val_images[0])
-            
+
+        if self.tracking_uri:
+            self.tracking_uri = self._normalize_tracking_uri(self.tracking_uri)
+            if self.tracking_uri.startswith(("http://", "https://")) and not (
+                os.environ.get("MLFLOW_TRACKING_TOKEN")
+                or (
+                    os.environ.get("MLFLOW_TRACKING_USERNAME")
+                    and os.environ.get("MLFLOW_TRACKING_PASSWORD")
+                )
+            ):
+                raise ValueError(
+                    "GitLab MLflow logging requires authentication. Set MLFLOW_TRACKING_TOKEN, "
+                    "or set both MLFLOW_TRACKING_USERNAME and MLFLOW_TRACKING_PASSWORD."
+                )
+            mlflow.set_tracking_uri(self.tracking_uri)
+            os.environ["MLFLOW_TRACKING_URI"] = self.tracking_uri
+
         print(f"[{self.__class__.__name__}] Callbacks ready for injection.")
 
     def get_callbacks(self) -> dict:
@@ -29,12 +58,12 @@ class GitLabMLflowLogger(BaseLogger):
     def _draw_ground_truth(self, image_path: str):
         """Reads the corresponding label file and draws GT boxes."""
         img = cv2.imread(image_path)
-        if img is None: 
+        if img is None:
             return None
         h, w, _ = img.shape
 
         label_path = image_path.replace("images", "labels").replace(".jpg", ".txt")
-        if not os.path.exists(label_path): 
+        if not os.path.exists(label_path):
             return img
 
         with open(label_path, "r") as f:
