@@ -1,5 +1,9 @@
 _target_: core.trainers.ultralytics.UltralyticsTrainer
 
+export_onnx: true
+onnx_export_args:
+  simplify: false
+
 args:
   data: "configs/fsoco.yaml"
   epochs: 50
