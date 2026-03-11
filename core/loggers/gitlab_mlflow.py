@@ -1,12 +1,14 @@
 import os
 import re
-import cv2
-import numpy as np
-import mlflow
 from pathlib import Path
+
+import cv2
+import mlflow
+import numpy as np
 from ultralytics import YOLO
 
 from core.loggers.base import BaseLogger
+
 
 class GitLabMLflowLogger(BaseLogger):
     uses_mlflow = True
@@ -25,12 +27,23 @@ class GitLabMLflowLogger(BaseLogger):
             return tracking_uri
         return Path(tracking_uri).resolve().as_uri()
 
-    def setup(self, val_image_dir: str, class_map: dict, experiment_name: str, run_name: str):
+    def setup(
+        self,
+        val_image_dir: str,
+        class_map: dict,
+        experiment_name: str,
+        run_name: str,
+        val_image_paths: list[str] | None = None,
+        class_colors: dict[int, tuple[int, int, int]] | None = None,
+    ):
         self.reverse_class_map = {v: k for k, v in class_map.items()}
 
-        val_images = list(Path(val_image_dir).glob("*.jpg"))
-        if val_images:
-            self.val_image_path = str(val_images[0])
+        if val_image_paths:
+            self.val_image_path = val_image_paths[0]
+        else:
+            val_images = list(Path(val_image_dir).glob("*.jpg"))
+            if val_images:
+                self.val_image_path = str(val_images[0])
 
         if self.tracking_uri:
             self.tracking_uri = self._normalize_tracking_uri(self.tracking_uri)
@@ -79,7 +92,7 @@ class GitLabMLflowLogger(BaseLogger):
 
             cv2.rectangle(img, (x1, y1), (x2, y2), (0, 255, 0), 2)
             name = self.reverse_class_map.get(cls_id, str(cls_id))
-            cv2.putText(img, f"GT: {name}", (x1, y1 - 5), 
+            cv2.putText(img, f"GT: {name}", (x1, y1 - 5),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
         return img
 

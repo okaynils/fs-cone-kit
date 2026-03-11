@@ -1,8 +1,9 @@
 from pathlib import Path
 
 import hydra
-from omegaconf import DictConfig, OmegaConf, open_dict
 from hydra.utils import instantiate
+from omegaconf import DictConfig, OmegaConf, open_dict
+
 
 @hydra.main(version_base=None, config_path="../configs", config_name="config")
 def main(cfg: DictConfig):
@@ -11,6 +12,8 @@ def main(cfg: DictConfig):
     dataset_manager = instantiate(cfg.dataset)
     dataset_yaml_path = dataset_manager.prepare()
     val_image_dir = str(dataset_manager.prep_dir / "images" / "val")
+    val_image_paths = dataset_manager.get_plot_image_paths()
+    class_colors = dataset_manager.get_class_colors()
 
     with open_dict(cfg):
         cfg.trainer.args.data = dataset_yaml_path
@@ -49,7 +52,9 @@ def main(cfg: DictConfig):
                 val_image_dir=val_image_dir,
                 class_map=cfg.dataset.class_map,
                 experiment_name=cfg.model.name,
-                run_name=cfg.run_name
+                run_name=cfg.run_name,
+                val_image_paths=val_image_paths,
+                class_colors=class_colors,
             )
 
             mlflow_enabled = mlflow_enabled or getattr(logger, "uses_mlflow", False)
@@ -73,6 +78,7 @@ def main(cfg: DictConfig):
         mlflow_tracking_uri=mlflow_tracking_uri
     )
     trainer.train()
+
 
 if __name__ == "__main__":
     main()

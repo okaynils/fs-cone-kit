@@ -10,7 +10,15 @@ class BaseLogger(MetricsMixin, ABC):
         super().__init__(metrics=metrics)
 
     @abstractmethod
-    def setup(self, val_image_dir: str, class_map: dict, experiment_name: str, run_name: str):
+    def setup(
+        self,
+        val_image_dir: str,
+        class_map: dict,
+        experiment_name: str,
+        run_name: str,
+        val_image_paths: list[str] | None = None,
+        class_colors: dict[int, tuple[int, int, int]] | None = None,
+    ):
         """Initialize the logger with dataset, run, and metric configuration."""
         pass
 

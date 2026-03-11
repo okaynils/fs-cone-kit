@@ -6,6 +6,8 @@ preprocessed_dir: "data/fsoco/preprocessed"
 debug_mode: true
 train_limit: 150
 val_limit: 20
+plot_image_count: 4
+plot_images: []
 
 class_map:
   blue_cone: 0
@@ -13,3 +15,10 @@ class_map:
   orange_cone: 2
   large_orange_cone: 3
   unknown_cone: 4
+
+class_colors:
+  blue_cone: [0, 102, 255]
+  yellow_cone: [255, 215, 0]
+  orange_cone: [255, 140, 0]
+  large_orange_cone: [255, 94, 0]
+  unknown_cone: [160, 160, 160]
