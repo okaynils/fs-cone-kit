@@ -1,5 +1,5 @@
 def main():
-    print("Hello from dl-pipeline!")
+    print("Hello from fs-cone-kit!")
 
 
 if __name__ == "__main__":

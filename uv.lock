@@ -398,7 +398,7 @@ wheels = [
 ]
 
 [[package]]
-name = "dl-pipeline"
+name = "fs-cone-kit"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
