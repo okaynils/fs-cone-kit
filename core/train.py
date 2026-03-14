@@ -1,8 +1,11 @@
 from pathlib import Path
 
 import hydra
+from dotenv import load_dotenv
 from hydra.utils import instantiate
 from omegaconf import DictConfig, OmegaConf, open_dict
+
+load_dotenv()
 
 
 @hydra.main(version_base=None, config_path="../configs", config_name="config")

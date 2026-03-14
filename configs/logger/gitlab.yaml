@@ -1,4 +1,4 @@
 _target_: core.loggers.gitlab_mlflow.GitLabMLflowLogger
 experiment_name: "fsoco_cone_detection"
-tracking_uri: "https://gitlab.liu.se/api/v4/projects/57936/ml/mlflow/"
+tracking_uri: ${oc.env:MLFLOW_TRACKING_URI,null}
 val_image_path: "data/fsoco/preprocessed/images/val/sample.jpg"
