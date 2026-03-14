@@ -5,13 +5,13 @@
   <img alt="fs-cone-kit logo" src="/docs/logo_dark.svg" width="50%" height="50%">
 </picture>
 
-# fs-cone-kit
-
 Train a cone detector for Formula Student Driverless.
 
 </div>
 
-![object detection demo](/docs/obj_detection_demo.gif)
+<p align="center">
+  <img alt="object detection demo" src="/docs/obj_detection_demo.gif" width="80%">
+</p>
 
 I am building this at the FS Driverless team at Linköping University. I maintain it because useful tooling should not stay trapped inside one team.
 
@@ -196,7 +196,7 @@ core/train.py            training entrypoint
 If your data is not already in YOLO format, copy `core/data/fsoco.py` and make your own dataset adapter.
 That is the place to handle download, conversion, cropping, relabeling, whatever your data needs.
 
-## TL;DR
+## tl;dr
 
 1. install with `uv sync`
 2. run `uv run -m core.train` to make sure the pipeline works
@@ -205,6 +205,3 @@ That is the place to handle download, conversion, cropping, relabeling, whatever
 5. train
 
 That is it.
-
-
-
