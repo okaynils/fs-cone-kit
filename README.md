@@ -5,13 +5,9 @@
   <img alt="fs-cone-kit logo" src="/docs/logo_dark.svg" width="50%" height="50%">
 </picture>
 
-Train a cone detector for Formula Student Driverless.
+*Train a cone detector for Formula Student Driverless.*
 
 </div>
-
-<p align="center">
-  <img alt="object detection demo" src="/docs/obj_detection_demo.gif" width="80%">
-</p>
 
 I am building this at the FS Driverless team at Linköping University. I maintain it because useful tooling should not stay trapped inside one team.
 
@@ -20,6 +16,10 @@ It downloads and preprocesses [FSOCO](https://fsoco.github.io/fsoco-dataset/) ou
 If your team already has a YOLO dataset, use that instead.
 
 No notebooks. No clickops. Run the command and train the model.
+
+<p align="center">
+  <img alt="object detection demo" src="/docs/obj_detection_demo.gif" width="80%">
+</p>
 
 ## What it does
 
