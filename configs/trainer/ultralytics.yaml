@@ -1,6 +1,7 @@
 _target_: core.trainers.ultralytics.UltralyticsTrainer
 
 export_onnx: true
+resume_from: null
 onnx_export_args:
   simplify: false
 
@@ -9,4 +10,6 @@ args:
   epochs: 50
   imgsz: 640
   batch: 16
+  seed: ${seed}
+  deterministic: true
   project: "models/fine_tuned"

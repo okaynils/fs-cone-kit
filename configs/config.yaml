@@ -11,6 +11,8 @@ model:
   name: "yolo11n"
   weights: "yolo11n.pt"
 
+seed: 42
+
 loggers:
   #gitlab:
   #  _target_: core.loggers.gitlab_mlflow.GitLabMLflowLogger

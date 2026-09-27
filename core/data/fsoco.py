@@ -30,6 +30,10 @@ class FSOCODataset(BaseDataset):
         debug_mode: bool = True,
         train_limit: int = 150,
         val_limit: int = 20,
+        test_limit: int = 20,
+        split_seed: int = 42,
+        val_fraction: float = 0.2,
+        test_fraction: float = 0.1,
         plot_images: list[str] | None = None,
         plot_image_count: int = 4,
         class_colors: dict[str, list[int]] | None = None,
@@ -47,8 +51,55 @@ class FSOCODataset(BaseDataset):
         self.debug_mode = debug_mode
         self.train_limit = train_limit
         self.val_limit = val_limit
+        self.test_limit = test_limit
+        self.split_seed = split_seed
+        self.val_fraction = val_fraction
+        self.test_fraction = test_fraction
 
-        random.seed(42)
+        if val_fraction < 0 or test_fraction < 0 or val_fraction + test_fraction >= 1:
+            raise ValueError("val_fraction and test_fraction must be non-negative and sum to less than 1")
+
+    @property
+    def _state_path(self) -> Path:
+        return self.prep_dir / ".dataset_state.json"
+
+    def _expected_state(self) -> dict:
+        return {
+            "schema_version": 1,
+            "class_map": dict(self.class_map),
+            "debug_mode": self.debug_mode,
+            "train_limit": self.train_limit,
+            "val_limit": self.val_limit,
+            "test_limit": self.test_limit,
+            "split_seed": self.split_seed,
+            "val_fraction": self.val_fraction,
+            "test_fraction": self.test_fraction,
+        }
+
+    def _is_ready(self, yaml_path: Path) -> bool:
+        if not super()._is_ready(yaml_path):
+            return False
+        # A YOLO dataset supplied by the user has no FSOCO state file. Keep the
+        # documented adapter-free path working and only invalidate datasets
+        # that this class prepared itself.
+        if not self._state_path.exists():
+            return True
+        try:
+            state = json.loads(self._state_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return False
+        return state == self._expected_state()
+
+    def _split_annotations(self, json_files: list[Path]) -> dict[str, list[Path]]:
+        shuffled = sorted(json_files)
+        random.Random(self.split_seed).shuffle(shuffled)
+        test_end = round(len(shuffled) * self.test_fraction)
+        val_end = test_end + round(len(shuffled) * self.val_fraction)
+        return {
+            "test": shuffled[:test_end],
+            "val": shuffled[test_end:val_end],
+            "train": shuffled[val_end:],
+        }
 
     @staticmethod
     def crop_black_borders(img_path, threshold=20):
@@ -105,28 +156,28 @@ class FSOCODataset(BaseDataset):
         if self.prep_dir.exists():
             shutil.rmtree(self.prep_dir)
 
-        for split in ['train', 'val']:
+        for split in ['train', 'val', 'test']:
             (self.prep_dir / 'images' / split).mkdir(parents=True, exist_ok=True)
             (self.prep_dir / 'labels' / split).mkdir(parents=True, exist_ok=True)
 
         json_files = list(self.raw_dir.rglob("ann/*.json"))
-        random.shuffle(json_files)
+        split_files = self._split_annotations(json_files)
 
         print(f"[{self.__class__.__name__}] Found {len(json_files)} annotations. Processing...")
 
-        counts = {"train": 0, "val": 0}
+        counts = {"train": 0, "val": 0, "test": 0}
+        manifest_splits: dict[str, list[dict[str, str]]] = {name: [] for name in split_files}
 
-        for json_file in tqdm(json_files, desc="Processing Images"):
-            # 1. Determine Split (Random 80/20)
-            split_name = 'train' if random.random() < 0.8 else 'val'
+        assignments = [
+            (split_name, json_file)
+            for split_name, files in split_files.items()
+            for json_file in files
+        ]
+        limits = {"train": self.train_limit, "val": self.val_limit, "test": self.test_limit}
 
-            # 2. Check Limits
-            if self.debug_mode:
-                limit = self.train_limit if split_name == 'train' else self.val_limit
-                if counts[split_name] >= limit:
-                    continue
-                if counts['train'] >= self.train_limit and counts['val'] >= self.val_limit:
-                    break
+        for split_name, json_file in tqdm(assignments, desc="Processing Images"):
+            if self.debug_mode and counts[split_name] >= limits[split_name]:
+                continue
 
             # 3. Locate Source Image
             image_name = json_file.stem
@@ -193,5 +244,30 @@ class FSOCODataset(BaseDataset):
                     out_f.write('\n'.join(yolo_lines))
 
                 counts[split_name] += 1
+                manifest_splits[split_name].append({
+                    "image": str((Path("images") / split_name / new_filename)),
+                    "label": str((Path("labels") / split_name / label_path.name)),
+                    "source_annotation": str(json_file.relative_to(self.raw_dir)),
+                })
 
-        print(f"[{self.__class__.__name__}] Done! Created {counts['train']} train images and {counts['val']} val images.")
+        manifest = {
+            "schema_version": 1,
+            "split_seed": self.split_seed,
+            "val_fraction": self.val_fraction,
+            "test_fraction": self.test_fraction,
+            "class_map": dict(self.class_map),
+            "splits": manifest_splits,
+        }
+        self.split_manifest_path.write_text(
+            json.dumps(manifest, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        self._state_path.write_text(
+            json.dumps(self._expected_state(), indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+
+        print(
+            f"[{self.__class__.__name__}] Done! Created {counts['train']} train, "
+            f"{counts['val']} validation, and {counts['test']} test images."
+        )

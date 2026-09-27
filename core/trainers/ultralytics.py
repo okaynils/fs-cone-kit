@@ -3,6 +3,8 @@ import os
 import re
 from pathlib import Path
 
+from core.experiments import relative_to_experiment
+from core.evaluation import serialize_ultralytics_evaluation
 from core.trainers.base import BaseTrainer
 from ultralytics import YOLO
 from ultralytics.utils import SETTINGS
@@ -13,12 +15,14 @@ class UltralyticsTrainer(BaseTrainer):
         self,
         args: dict,
         export_onnx: bool = True,
+        resume_from: str | None = None,
         onnx_export_args: dict | None = None,
         **kwargs,
     ):
         super().__init__(**kwargs)
         self.train_args = args
         self.export_onnx = export_onnx
+        self.resume_from = resume_from
         self.onnx_export_args = onnx_export_args or {}
 
     @staticmethod
@@ -37,8 +41,10 @@ class UltralyticsTrainer(BaseTrainer):
         callbacks: dict = None,
         enable_mlflow: bool = False,
         mlflow_tracking_uri: str | None = None,
+        experiment_dir: str | Path = ".",
     ):
-        self.model = YOLO(model_weights)
+        self.experiment_dir = Path(experiment_dir).resolve()
+        self.model = YOLO(self.resume_from or model_weights)
 
         dict.__setitem__(SETTINGS, "mlflow", enable_mlflow)
         import ultralytics.utils.callbacks.mlflow as ultralytics_mlflow_callbacks
@@ -53,8 +59,11 @@ class UltralyticsTrainer(BaseTrainer):
             for key in ("MLFLOW_EXPERIMENT_NAME", "MLFLOW_RUN", "MLFLOW_TRACKING_URI"):
                 os.environ.pop(key, None)
 
-        self.train_args["project"] = "."
-        self.train_args["name"] = "yolo_run"
+        self.train_args["project"] = str(self.experiment_dir)
+        self.train_args["name"] = "ultralytics_files"
+        self.train_args["exist_ok"] = True
+        if self.resume_from:
+            self.train_args["resume"] = True
 
         if callbacks:
             for event, func_list in callbacks.items():
@@ -113,7 +122,63 @@ class UltralyticsTrainer(BaseTrainer):
         if self.model is None:
             raise ValueError("Model is not initialized. Call setup() first.")
 
-        self.model.train(**self.train_args)
+        result = self.model.train(**self.train_args)
 
         if self.export_onnx:
             self._export_trained_checkpoints()
+
+        trainer = getattr(self.model, "trainer", None)
+        if trainer is None:
+            return {"status": "complete"}
+
+        results_dict = getattr(getattr(trainer, "validator", None), "metrics", None)
+        results_dict = getattr(results_dict, "results_dict", {}) or {}
+        return {
+            "status": "complete",
+            "epochs_completed": int(getattr(trainer, "epoch", -1)) + 1,
+            "best_checkpoint": relative_to_experiment(getattr(trainer, "best", None), self.experiment_dir),
+            "last_checkpoint": relative_to_experiment(getattr(trainer, "last", None), self.experiment_dir),
+            "metrics_csv": relative_to_experiment(
+                getattr(trainer, "csv", self.experiment_dir / "ultralytics_files" / "results.csv"),
+                self.experiment_dir,
+            ),
+            "final_validation_metrics": {
+                str(key): float(value) for key, value in results_dict.items()
+                if isinstance(value, (int, float)) or hasattr(value, "item")
+            },
+            "resumed_from": self.resume_from,
+            "ultralytics_result_type": type(result).__name__,
+        }
+
+    def evaluate(
+        self,
+        model_path: str | Path,
+        data: str,
+        split: str,
+        output_dir: str | Path,
+        dataset_info: dict,
+        evaluation_args: dict | None = None,
+    ) -> dict:
+        checkpoint = Path(model_path).resolve()
+        if not checkpoint.exists():
+            raise FileNotFoundError(checkpoint)
+
+        model = YOLO(str(checkpoint))
+        args = dict(evaluation_args or {})
+        metrics = model.val(
+            data=data,
+            split=split,
+            project=str(Path(output_dir).resolve().parent),
+            name=Path(output_dir).name,
+            exist_ok=True,
+            plots=True,
+            **args,
+        )
+        return serialize_ultralytics_evaluation(
+            metrics=metrics,
+            model=model,
+            checkpoint=checkpoint,
+            split=split,
+            dataset_info=dataset_info,
+            evaluation_args=args,
+        )

@@ -2,14 +2,34 @@ from pathlib import Path
 
 import hydra
 from dotenv import load_dotenv
+from hydra.core.hydra_config import HydraConfig
 from hydra.utils import instantiate
 from omegaconf import DictConfig, OmegaConf, open_dict
+
+from core.experiments import ExperimentArtifacts
 
 load_dotenv()
 
 
 @hydra.main(version_base=None, config_path="../configs", config_name="config")
 def main(cfg: DictConfig):
+    run(cfg, Path(HydraConfig.get().runtime.output_dir))
+
+
+def run(cfg: DictConfig, experiment_dir: Path):
+    project_root = Path(__file__).resolve().parents[1]
+    experiment_dir = experiment_dir.resolve()
+    weights_dir = experiment_dir / "ultralytics_files" / "weights"
+    if weights_dir.exists() and any(weights_dir.iterdir()) and not cfg.trainer.get("resume_from"):
+        raise FileExistsError(
+            f"Experiment already contains checkpoints: {weights_dir}. "
+            "Choose a new run_name or resume the existing experiment."
+        )
+    with open_dict(cfg):
+        for path_key in ("raw_dir", "preprocessed_dir"):
+            configured_path = Path(cfg.dataset[path_key])
+            if not configured_path.is_absolute():
+                cfg.dataset[path_key] = str((project_root / configured_path).resolve())
 
     # prep dataset
     dataset_manager = instantiate(cfg.dataset)
@@ -20,6 +40,13 @@ def main(cfg: DictConfig):
 
     with open_dict(cfg):
         cfg.trainer.args.data = dataset_yaml_path
+
+    artifacts = ExperimentArtifacts(experiment_dir)
+    artifacts.start(
+        resolved_config=OmegaConf.to_container(cfg, resolve=True),
+        dataset_info=dataset_manager.get_dataset_info(),
+        project_root=project_root,
+    )
 
     # prep metrics
     instantiated_metrics = []
@@ -70,7 +97,7 @@ def main(cfg: DictConfig):
                     aggregated_callbacks[event] = []
                 aggregated_callbacks[event].append(func)
 
-    # taining!
+    # train
     trainer = instantiate(cfg.trainer)
     trainer.setup(
         model_weights=cfg.model.weights,
@@ -78,9 +105,11 @@ def main(cfg: DictConfig):
         run_name=cfg.run_name,
         callbacks=aggregated_callbacks,
         enable_mlflow=mlflow_enabled,
-        mlflow_tracking_uri=mlflow_tracking_uri
+        mlflow_tracking_uri=mlflow_tracking_uri,
+        experiment_dir=experiment_dir,
     )
-    trainer.train()
+    summary = trainer.train()
+    artifacts.finish_training(summary)
 
 
 if __name__ == "__main__":
