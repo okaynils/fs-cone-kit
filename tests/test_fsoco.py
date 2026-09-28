@@ -37,6 +37,25 @@ class FSOCOSplitTests(unittest.TestCase):
             dataset(43)._split_annotations(annotations),
         )
 
+    def test_team_grouping_keeps_each_team_in_one_split(self):
+        grouped = dataset(42)
+        grouped.split_group = "team"
+        annotations = [
+            Path(f"team-{team}/ann/{index}.json")
+            for team in range(10)
+            for index in range(10)
+        ]
+        splits = grouped._split_annotations(annotations)
+        membership = {}
+        for split, paths in splits.items():
+            for path in paths:
+                team = path.parent.parent.name
+                if team in membership:
+                    self.assertEqual(membership[team], split)
+                else:
+                    membership[team] = split
+        self.assertEqual(set(membership), {f"team-{index}" for index in range(10)})
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -58,3 +58,4 @@ data/**/raw/*
 outputs/
 wandb/
 runs/
+/study/

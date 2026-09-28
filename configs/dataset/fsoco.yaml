@@ -10,6 +10,7 @@ test_limit: 20
 split_seed: ${seed}
 val_fraction: 0.2
 test_fraction: 0.1
+split_group: null
 plot_image_count: 4
 plot_images: []
 

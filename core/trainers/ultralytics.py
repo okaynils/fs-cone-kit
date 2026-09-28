@@ -182,3 +182,52 @@ class UltralyticsTrainer(BaseTrainer):
             dataset_info=dataset_info,
             evaluation_args=args,
         )
+
+    def predict_records(
+        self,
+        model_path: str | Path,
+        image_paths: list[str],
+        dataset_root: Path,
+        confidence: float = 0.001,
+        prediction_args: dict | None = None,
+    ) -> list[dict]:
+        """Save backend-neutral normalized boxes for later local analysis."""
+        model = YOLO(str(Path(model_path).resolve()))
+        allowed_args = {"imgsz", "device", "batch"}
+        args = {
+            key: value for key, value in dict(prediction_args or {}).items()
+            if key in allowed_args
+        }
+        results = model.predict(
+            source=image_paths,
+            conf=confidence,
+            stream=True,
+            verbose=False,
+            **args,
+        )
+        records = []
+        for result in results:
+            path = Path(result.path).resolve()
+            try:
+                image_name = str(path.relative_to(dataset_root.resolve()))
+            except ValueError:
+                image_name = str(path)
+            height, width = result.orig_shape
+            boxes = []
+            if result.boxes is not None:
+                coordinates = result.boxes.xyxy.detach().cpu().tolist()
+                classes = result.boxes.cls.detach().cpu().tolist()
+                confidences = result.boxes.conf.detach().cpu().tolist()
+                for xyxy, class_id, score in zip(coordinates, classes, confidences):
+                    boxes.append({
+                        "class_id": int(class_id),
+                        "confidence": float(score),
+                        "xyxy": [
+                            float(xyxy[0]) / width,
+                            float(xyxy[1]) / height,
+                            float(xyxy[2]) / width,
+                            float(xyxy[3]) / height,
+                        ],
+                    })
+            records.append({"image": image_name, "boxes": boxes})
+        return records

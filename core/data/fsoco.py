@@ -34,6 +34,7 @@ class FSOCODataset(BaseDataset):
         split_seed: int = 42,
         val_fraction: float = 0.2,
         test_fraction: float = 0.1,
+        split_group: str | None = None,
         plot_images: list[str] | None = None,
         plot_image_count: int = 4,
         class_colors: dict[str, list[int]] | None = None,
@@ -55,6 +56,10 @@ class FSOCODataset(BaseDataset):
         self.split_seed = split_seed
         self.val_fraction = val_fraction
         self.test_fraction = test_fraction
+        self.split_group = split_group
+
+        if split_group not in (None, "team"):
+            raise ValueError("split_group must be null or 'team'")
 
         if val_fraction < 0 or test_fraction < 0 or val_fraction + test_fraction >= 1:
             raise ValueError("val_fraction and test_fraction must be non-negative and sum to less than 1")
@@ -74,6 +79,7 @@ class FSOCODataset(BaseDataset):
             "split_seed": self.split_seed,
             "val_fraction": self.val_fraction,
             "test_fraction": self.test_fraction,
+            "split_group": self.split_group,
         }
 
     def _is_ready(self, yaml_path: Path) -> bool:
@@ -93,6 +99,28 @@ class FSOCODataset(BaseDataset):
     def _split_annotations(self, json_files: list[Path]) -> dict[str, list[Path]]:
         shuffled = sorted(json_files)
         random.Random(self.split_seed).shuffle(shuffled)
+        if self.split_group == "team":
+            grouped: dict[str, list[Path]] = {}
+            for path in shuffled:
+                grouped.setdefault(path.parent.parent.name, []).append(path)
+
+            group_names = list(grouped)
+            random.Random(self.split_seed).shuffle(group_names)
+            targets = {
+                "test": round(len(shuffled) * self.test_fraction),
+                "val": round(len(shuffled) * self.val_fraction),
+            }
+            result = {"test": [], "val": [], "train": []}
+            for group_name in group_names:
+                if len(result["test"]) < targets["test"]:
+                    destination = "test"
+                elif len(result["val"]) < targets["val"]:
+                    destination = "val"
+                else:
+                    destination = "train"
+                result[destination].extend(grouped[group_name])
+            return result
+
         test_end = round(len(shuffled) * self.test_fraction)
         val_end = test_end + round(len(shuffled) * self.val_fraction)
         return {
@@ -248,6 +276,7 @@ class FSOCODataset(BaseDataset):
                     "image": str((Path("images") / split_name / new_filename)),
                     "label": str((Path("labels") / split_name / label_path.name)),
                     "source_annotation": str(json_file.relative_to(self.raw_dir)),
+                    "source_group": team_name,
                 })
 
         manifest = {

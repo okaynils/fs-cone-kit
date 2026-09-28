@@ -1,0 +1,23 @@
+# @package _global_
+
+run_name: small-cones-baseline-seed42
+seed: 42
+loggers: null
+
+model:
+  name: yolo11n
+  weights: yolo11n.pt
+
+dataset:
+  debug_mode: false
+  preprocessed_dir: data/fsoco/study-small-cones
+  split_group: team
+  split_seed: 42
+
+trainer:
+  args:
+    epochs: 50
+    imgsz: 640
+    batch: 16
+    deterministic: true
+    scale: 0.5

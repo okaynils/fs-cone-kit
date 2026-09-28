@@ -15,6 +15,7 @@ from core.benchmarking import benchmark_ultralytics_model
 from core.comparison import collect_comparison_rows, write_comparison
 from core.evaluate import _checkpoint_path, evaluate_experiment
 from core.experiments import write_json
+from core.studies import evaluate_study, prepare_study
 from core.train import run
 
 
@@ -26,16 +27,22 @@ def _write_dataset(root: Path) -> None:
         3: "large_orange_cone",
         4: "unknown_cone",
     }
-    for split, count in (("train", 2), ("val", 1), ("test", 1)):
+    for split_index, (split, count) in enumerate((("train", 2), ("val", 1), ("test", 2))):
         (root / "images" / split).mkdir(parents=True)
         (root / "labels" / split).mkdir(parents=True)
         for index in range(count):
-            image = np.full((64, 64, 3), 127, dtype=np.uint8)
-            cv2.rectangle(image, (20, 20), (44, 52), (255, 0, 0), -1)
+            rng = np.random.default_rng(split_index * 10 + index)
+            image = rng.integers(64, 192, size=(64, 64, 3), dtype=np.uint8)
+            if split == "test" and index == 0:
+                box = (0.5, 0.5, 0.05, 0.08)
+                cv2.rectangle(image, (30, 29), (34, 35), (255, 0, 0), -1)
+            else:
+                box = (0.5, 0.5625, 0.375, 0.5)
+                cv2.rectangle(image, (20, 20), (44, 52), (255, 0, 0), -1)
             stem = f"{split}-{index}"
             cv2.imwrite(str(root / "images" / split / f"{stem}.jpg"), image)
             (root / "labels" / split / f"{stem}.txt").write_text(
-                "0 0.5 0.5625 0.375 0.5\n", encoding="utf-8"
+                f"0 {box[0]} {box[1]} {box[2]} {box[3]}\n", encoding="utf-8"
             )
     (root / "dataset.yaml").write_text(
         yaml.safe_dump({
@@ -99,6 +106,17 @@ def main() -> None:
         assert csv_path.exists() and markdown_path.exists()
         assert (experiment / "experiment/config.yaml").exists()
         assert (experiment / "ultralytics_files/weights/best.pt").exists()
+
+        study_dir = temporary_root / "study"
+        manifest_path = prepare_study(experiment, study_dir)
+        study_result, predictions = evaluate_study(
+            experiment, study_dir, device="cpu", batch=1, imgsz=32
+        )
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        assert manifest["leakage"]["status"] == "pass"
+        assert manifest["slices"]["small_cones"]["image_count"] == 1
+        assert manifest["slices"]["ordinary"]["image_count"] == 1
+        assert study_result.exists() and predictions.exists()
         print("CPU pipeline smoke test passed")
 
 

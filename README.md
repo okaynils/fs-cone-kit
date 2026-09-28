@@ -243,6 +243,69 @@ dataset fingerprints or evaluation settings are marked non-comparable. Timing
 rows retain a benchmark context ID, and the command warns when the hardware or
 protocol differs.
 
+## Study small-cone failures
+
+The first failure study asks whether stronger scale augmentation helps on
+images with small cones. The plan and acceptance criteria are fixed in
+[`docs/failure-study-plan.md`](docs/failure-study-plan.md).
+
+Train the baseline and intervention:
+
+```bash
+uv run -m core.train +study=small_cones_baseline
+uv run -m core.train +study=small_cones_scale
+```
+
+Both runs use YOLO11n, seed 42, 50 epochs, and the same team-grouped FSOCO
+split. The intervention changes only Ultralytics `scale` from `0.5` to `0.9`.
+The configs disable external loggers.
+
+Prepare the fixed slices and inspect the leakage audit:
+
+```bash
+uv run -m core.study prepare outputs/small-cones-baseline-seed42
+```
+
+This writes `study/small-cones/manifest.json`. The `small_cones` slice contains
+test images with at least one ground-truth box covering at most 0.5% of the
+image. `ordinary` is the disjoint remainder. Box size is a proxy for distance,
+not a distance measurement.
+
+The audit checks source-team overlap, exact duplicates, and perceptual
+near-duplicates across splits. Evaluation stops if it finds leakage. FSOCO does
+not expose recording or track IDs, so the audit cannot verify those groups.
+
+Evaluate both saved checkpoints:
+
+```bash
+uv run -m core.study evaluate outputs/small-cones-baseline-seed42 --device cpu
+uv run -m core.study evaluate outputs/small-cones-scale-seed42 --device cpu
+```
+
+Build the report from the saved results and predictions:
+
+```bash
+uv run -m core.study report \
+  study/small-cones/results/small-cones-baseline-seed42.json \
+  study/small-cones/results/small-cones-scale-seed42.json
+```
+
+The report includes full-set and slice mAP50-95, recall, supported per-class
+results, annotation counts, and a deterministic false-positive and
+false-negative gallery. One run per condition does not measure run-to-run
+variation. Repeat both configs with new seeds before treating a delta as
+stable.
+
+Keep the dataset split fixed when you repeat training:
+
+```bash
+uv run -m core.train +study=small_cones_baseline seed=43 run_name=small-cones-baseline-seed43
+uv run -m core.train +study=small_cones_scale seed=43 run_name=small-cones-scale-seed43
+```
+
+The study configs pin `dataset.split_seed=42`. The override changes the
+training seed only.
+
 ## Reproduce or resume a run
 
 Start a new experiment from the saved resolved config:
