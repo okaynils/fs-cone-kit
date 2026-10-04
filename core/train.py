@@ -110,6 +110,7 @@ def run(cfg: DictConfig, experiment_dir: Path):
     )
     summary = trainer.train()
     artifacts.finish_training(summary)
+    trainer.export()
 
 
 if __name__ == "__main__":

@@ -15,6 +15,10 @@ from core.benchmarking import benchmark_ultralytics_model
 from core.comparison import collect_comparison_rows, write_comparison
 from core.evaluate import _checkpoint_path, evaluate_experiment
 from core.experiments import write_json
+from core.gates import run_gates
+from core.parity import load_release_settings, run_parity
+from core.quantize import quantize_experiment
+from core.release import release_experiment
 from core.studies import evaluate_study, prepare_study
 from core.train import run
 
@@ -71,7 +75,6 @@ def main() -> None:
             "model.weights=yolo11n.yaml",
             f"dataset.preprocessed_dir={dataset_root}",
             f"dataset.raw_dir={temporary_root / 'raw'}",
-            "trainer.export_onnx=false",
             "trainer.args.epochs=1",
             "trainer.args.imgsz=32",
             "trainer.args.batch=2",
@@ -107,6 +110,21 @@ def main() -> None:
         assert (experiment / "experiment/config.yaml").exists()
         assert (experiment / "ultralytics_files/weights/best.pt").exists()
 
+        onnx_path = experiment / "ultralytics_files/weights/best.onnx"
+        assert onnx_path.exists()
+        # An untrained model scores everything near zero, so compare at a tiny threshold.
+        parity_settings = load_release_settings(
+            overrides=["parity.confidence=0.001", "parity.confidence_margin=0.0005"]
+        )["parity"]
+        parity = run_parity(experiment, onnx_path, parity_settings)
+        assert parity["status"] == "pass", parity["checks"]
+        assert parity["summary"]["reference_detections"] > 0
+        onnx_evaluation = json.loads(evaluate_experiment(
+            experiment, split="test", model=onnx_path, device="cpu", batch=1, imgsz=32
+        ).read_text(encoding="utf-8"))
+        assert onnx_evaluation["runtime"]["name"] == "onnxruntime"
+        assert onnx_evaluation["dataset_fingerprint"] == evaluation["dataset_fingerprint"]
+
         study_dir = temporary_root / "study"
         manifest_path = prepare_study(experiment, study_dir)
         study_result, predictions = evaluate_study(
@@ -117,6 +135,43 @@ def main() -> None:
         assert manifest["slices"]["small_cones"]["image_count"] == 1
         assert manifest["slices"]["ordinary"]["image_count"] == 1
         assert study_result.exists() and predictions.exists()
+
+        quantization_path, _ = quantize_experiment(
+            experiment, ["fp16", "int8"], load_release_settings()["quantization"], study_dir=study_dir
+        )
+        quantization = json.loads(quantization_path.read_text(encoding="utf-8"))
+        assert [row["label"] for row in quantization["rows"]] == ["fp32", "fp16", "int8"]
+        assert all(row["accuracy_comparable"] for row in quantization["rows"])
+        assert quantization["rows"][2]["calibration"]["split"] == "train"
+        assert set(quantization["rows"][2]["slices"]) == {"full", "small_cones", "ordinary"}
+
+        gates = run_gates(experiment, onnx_path, load_release_settings()["gates"])
+        assert set(gates["metrics"]["by_band"]) == {"far", "mid", "near"}
+        assert len(gates["checks"]) == len(gates["limits"])
+        assert gates["metrics"]["truths"] == 2
+
+        # An untrained model meets no real limit, and its near-tied class scores
+        # flip under INT8. This proves the pipeline, not the model.
+        release_settings = load_release_settings(overrides=[
+            "parity.confidence=0.001", "parity.confidence_margin=0.0005",
+            "parity.tolerances.int8.max_class_disagreement_rate=1.0",
+            "benchmark.warmup_runs=1", "benchmark.measured_runs=3",
+        ])
+        release_settings["gates"]["limits"] = {}
+        bundle, result = release_experiment(
+            experiment, "onnxruntime", "int8", release_settings, study_dir=study_dir
+        )
+        assert result["status"] == "pass", result["checks"]
+        files = {path.name for path in bundle.iterdir()}
+        assert files == {
+            "model.onnx", "contract.json", "parity.json", "evaluation.json", "quantization.json",
+            "gates.json", "benchmark.json", "experiment.json", "calibration.json",
+            "model_card.md", "manifest.json",
+        }, files
+        contract = json.loads((bundle / "contract.json").read_text(encoding="utf-8"))
+        assert contract["input"]["shape"] == [1, 3, 32, 32]
+        benchmark = json.loads((bundle / "benchmark.json").read_text(encoding="utf-8"))
+        assert set(benchmark["stages"]) == {"preprocess", "inference", "postprocess", "total"}
         print("CPU pipeline smoke test passed")
 
 

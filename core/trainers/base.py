@@ -28,3 +28,10 @@ class BaseTrainer(ABC):
         Execute the training loop.
         """
         pass
+
+    def export(self) -> list:
+        """
+        Export trained checkpoints after the training record is written.
+        Raise on failure. Return the exported paths.
+        """
+        return []

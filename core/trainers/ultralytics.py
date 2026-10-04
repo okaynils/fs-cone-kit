@@ -3,6 +3,7 @@ import os
 import re
 from pathlib import Path
 
+from core.deployment import runtime_record
 from core.experiments import relative_to_experiment
 from core.evaluation import serialize_ultralytics_evaluation
 from core.trainers.base import BaseTrainer
@@ -87,22 +88,29 @@ class UltralyticsTrainer(BaseTrainer):
         export_args.update(self.onnx_export_args)
         return export_args
 
-    def _export_checkpoint_to_onnx(self, checkpoint_path: Path):
+    def export_checkpoint_to_onnx(self, checkpoint_path: Path) -> Path:
+        """Export one checkpoint and fail loudly. A missing ONNX file is not a usable release."""
         export_args = self._build_onnx_export_args()
         print(f"[{self.__class__.__name__}] Exporting {checkpoint_path.name} to ONNX...")
 
         try:
             exported_path = YOLO(str(checkpoint_path)).export(**export_args)
-            print(f"[{self.__class__.__name__}] ONNX export complete: {exported_path}")
         except Exception as e:
-            print(f"[{self.__class__.__name__}] ONNX export failed for {checkpoint_path.name}: {e}")
+            raise RuntimeError(f"ONNX export failed for {checkpoint_path}: {e}") from e
+        if not exported_path or not Path(exported_path).is_file():
+            raise RuntimeError(f"ONNX export for {checkpoint_path} reported no file: {exported_path!r}")
+        print(f"[{self.__class__.__name__}] ONNX export complete: {exported_path}")
+        return Path(exported_path)
 
-    def _export_trained_checkpoints(self):
+    def export(self) -> list[Path]:
+        if not self.export_onnx:
+            return []
         trainer = getattr(self.model, "trainer", None)
         if trainer is None:
             print(f"[{self.__class__.__name__}] Skipping ONNX export because no trainer state was found.")
-            return
+            return []
 
+        exported = []
         for checkpoint_name in ("last", "best"):
             checkpoint_path = getattr(trainer, checkpoint_name, None)
             if not checkpoint_path:
@@ -116,16 +124,14 @@ class UltralyticsTrainer(BaseTrainer):
                 )
                 continue
 
-            self._export_checkpoint_to_onnx(checkpoint_path)
+            exported.append(self.export_checkpoint_to_onnx(checkpoint_path))
+        return exported
 
     def train(self):
         if self.model is None:
             raise ValueError("Model is not initialized. Call setup() first.")
 
         result = self.model.train(**self.train_args)
-
-        if self.export_onnx:
-            self._export_trained_checkpoints()
 
         trainer = getattr(self.model, "trainer", None)
         if trainer is None:
@@ -181,6 +187,7 @@ class UltralyticsTrainer(BaseTrainer):
             split=split,
             dataset_info=dataset_info,
             evaluation_args=args,
+            runtime=runtime_record(checkpoint, args.get("device"), half=bool(args.get("half"))),
         )
 
     def predict_records(

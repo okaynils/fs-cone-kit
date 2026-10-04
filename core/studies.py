@@ -307,6 +307,43 @@ def _training_controls(cfg: Any) -> dict[str, Any]:
     }
 
 
+def evaluate_slices(
+    trainer: Any,
+    model_path: Path,
+    study_dir: Path,
+    manifest: dict[str, Any],
+    evaluation_args: dict[str, Any],
+    output_root: Path,
+) -> dict[str, Any]:
+    """Evaluate one model on every fixed slice in a study manifest."""
+    slice_results = {}
+    for slice_name, summary in manifest["slices"].items():
+        if not summary["image_count"]:
+            slice_results[slice_name] = {"status": "empty"}
+            continue
+        slice_yaml = _slice_dataset_yaml(study_dir, slice_name, manifest)
+        slice_fingerprint = hashlib.sha256(
+            json.dumps({
+                "dataset": manifest["dataset_fingerprint"],
+                "slice": slice_name,
+                "images": [item["image"] for item in summary["images"]],
+            }, sort_keys=True).encode()
+        ).hexdigest()
+        result = trainer.evaluate(
+            model_path=model_path,
+            data=str(slice_yaml),
+            split="test",
+            output_dir=output_root / slice_name,
+            dataset_info={"fingerprint": slice_fingerprint, "split_counts": {"test": summary["image_count"]}},
+            evaluation_args=evaluation_args,
+        )
+        result["slice"] = slice_name
+        result["image_count"] = summary["image_count"]
+        result["cone_count"] = summary["cone_count"]
+        slice_results[slice_name] = result
+    return slice_results
+
+
 def evaluate_study(
     experiment_dir: Path,
     study_dir: Path,
@@ -331,31 +368,10 @@ def evaluate_study(
     args.setdefault("imgsz", int(cfg.trainer.args.imgsz))
     trainer = instantiate(cfg.trainer)
     model_path = _checkpoint_path(experiment_dir, checkpoint)
-    slice_results = {}
-    for slice_name, summary in manifest["slices"].items():
-        if not summary["image_count"]:
-            slice_results[slice_name] = {"status": "empty"}
-            continue
-        slice_yaml = _slice_dataset_yaml(study_dir, slice_name, manifest)
-        slice_fingerprint = hashlib.sha256(
-            json.dumps({
-                "dataset": manifest["dataset_fingerprint"],
-                "slice": slice_name,
-                "images": [item["image"] for item in summary["images"]],
-            }, sort_keys=True).encode()
-        ).hexdigest()
-        result = trainer.evaluate(
-            model_path=model_path,
-            data=str(slice_yaml),
-            split="test",
-            output_dir=experiment_dir / "evaluation_files" / "study" / slice_name,
-            dataset_info={"fingerprint": slice_fingerprint, "split_counts": {"test": summary["image_count"]}},
-            evaluation_args=args,
-        )
-        result["slice"] = slice_name
-        result["image_count"] = summary["image_count"]
-        result["cone_count"] = summary["cone_count"]
-        slice_results[slice_name] = result
+    slice_results = evaluate_slices(
+        trainer, model_path, study_dir, manifest, args,
+        output_root=experiment_dir / "evaluation_files" / "study",
+    )
 
     full_images = [
         str(Path(manifest["dataset_root"]) / item["image"])

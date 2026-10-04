@@ -46,6 +46,7 @@ def serialize_ultralytics_evaluation(
     split: str,
     dataset_info: dict[str, Any],
     evaluation_args: dict[str, Any],
+    runtime: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build a versioned result without retaining Ultralytics Python objects."""
     result_dict = dict(getattr(metrics, "results_dict", {}) or {})
@@ -76,8 +77,11 @@ def serialize_ultralytics_evaluation(
 
     confusion = getattr(getattr(metrics, "confusion_matrix", None), "matrix", None)
     torch_model = getattr(model, "model", model)
-    parameters = getattr(torch_model, "parameters", lambda: [])()
-    parameter_count = sum(parameter.numel() for parameter in parameters)
+    # Exported models have no PyTorch parameters to count.
+    parameter_count = (
+        sum(parameter.numel() for parameter in torch_model.parameters())
+        if hasattr(torch_model, "parameters") else None
+    )
 
     standard = {
         "precision": _float(getattr(box, "mp", result_dict.get("metrics/precision(B)", 0.0))),
@@ -121,6 +125,7 @@ def serialize_ultralytics_evaluation(
             str(key): _float(value) for key, value in (getattr(metrics, "speed", {}) or {}).items()
         },
         "evaluation_args": evaluation_args,
+        "runtime": runtime,
         "ultralytics_metrics": {
             str(key): _float(value) for key, value in result_dict.items()
             if isinstance(value, (int, float)) or hasattr(value, "item")

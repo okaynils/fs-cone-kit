@@ -25,7 +25,10 @@ No notebooks. No clickops. Run the command and train the model.
 
 - trains a YOLO cone detector
 - logs metrics and prediction images during training
-- exports ONNX after training
+- exports ONNX after training and checks it against the checkpoint
+- quantizes to FP16 and INT8 and reports what that cost
+- gates a release on recall by cone size, colour swaps, and false positives
+- writes a release bundle with the model, its preprocessing contract, and a model card
 - ships with an FSOCO pipeline so you can get a baseline fast
 - uses Hydra configs, so most changes are one command-line override
 - records enough local metadata to reproduce and compare experiments
@@ -187,12 +190,14 @@ After a run, look here:
 - `outputs/<run_name>/train.log`
 - `outputs/<run_name>/ultralytics_files/weights/best.pt`
 - `outputs/<run_name>/ultralytics_files/weights/last.pt`
+- `outputs/<run_name>/ultralytics_files/weights/best.onnx`
 - `outputs/<run_name>/ultralytics_files/results.csv`
 - `outputs/<run_name>/experiment/config.yaml`
 - `outputs/<run_name>/experiment/metadata.json`
 - `outputs/<run_name>/experiment/dataset.json`
 - `outputs/<run_name>/experiment/splits.json`
 - `outputs/<run_name>/experiment/training.json`
+- `outputs/<run_name>/release/<target>-<precision>/`
 
 The WandB logger also logs side-by-side ground truth vs prediction images from validation samples.
 
@@ -242,6 +247,136 @@ That writes `comparison.csv` and `comparison.md`. Accuracy rows from different
 dataset fingerprints or evaluation settings are marked non-comparable. Timing
 rows retain a benchmark context ID, and the command warns when the hardware or
 protocol differs.
+
+## Check the exported model
+
+Training exports `best.onnx` and `last.onnx` next to the checkpoints.
+A failed export fails the run. The training record is written first, so the
+checkpoints stay usable.
+
+An exported file is not proof. Check it against the checkpoint it came from:
+
+```bash
+uv run -m core.parity outputs/yolo11n-640 --device cpu
+```
+
+This runs `best.pt` through Ultralytics and `best.onnx` through onnxruntime
+with the plain NumPy and OpenCV preprocessing in `core/deployment.py`. Same
+test images, same thresholds. It reports box deviation in pixels, confidence
+differences, class flips, and boxes only one model found. It exits non-zero
+when a tolerance in `configs/release/default.yaml` is exceeded.
+
+Tolerances are Hydra values:
+
+```bash
+uv run -m core.parity outputs/yolo11n-640 parity.image_count=64 parity.confidence=0.3
+```
+
+Evaluate and benchmark the exported file with the usual commands:
+
+```bash
+uv run -m core.evaluate outputs/yolo11n-640 --model ultralytics_files/weights/best.onnx --device cpu
+uv run -m core.benchmark outputs/yolo11n-640 --model ultralytics_files/weights/best.onnx --device cpu
+```
+
+Both record the runtime they used. The evaluation lands in
+`experiment/evaluations/test_best_onnx.json`. `core.compare` still reads the
+checkpoint's `test.json`.
+
+## Quantize and measure the cost
+
+FP16 halves the file. INT8 shrinks it again. Neither is free. Measure it:
+
+```bash
+uv run -m core.quantize outputs/yolo11n-640 --precision fp16 int8 --device cpu
+```
+
+This writes `best_fp16.onnx` and `best_int8.onnx` next to `best.onnx`,
+evaluates all three on the test split, and reports every metric against the
+fp32 export. The report goes to `experiment/quantization/best.json` and
+`best.md`.
+
+INT8 calibration uses train images only, evenly spaced through the sorted
+split. The list is saved in `best_int8.calibration.json`. Only `Conv` layers are
+quantized. The YOLO head mixes pixel boxes with 0-1 scores, and one INT8 scale
+for both erases the scores.
+
+If `study/small-cones/manifest.json` exists for the same split and passed its
+leakage audit, the report includes the study slices. Small cones are the ones
+you can least afford to lose.
+
+Rows from a different split or different evaluation settings are marked
+non-comparable and get no delta.
+
+## Gate a release
+
+mAP averages over confidences the car never uses. The gates look at one
+confidence, the one you deploy with:
+
+```bash
+uv run -m core.gates outputs/yolo11n-640 --model ultralytics_files/weights/best_int8.onnx
+```
+
+It runs every test image through the exported model and reports:
+
+- recall and precision by box-size band: `far`, `mid`, `near`
+- how often blue and yellow cones get swapped
+- false positives per image
+
+Bands use box height divided by image height. That is a stand-in for distance,
+not a measurement.
+
+The command exits non-zero when a limit in `configs/release/default.yaml`
+fails. The defaults are a starting point I picked. None of them comes from
+the FSG rules. Set your own, or drop one with `~`:
+
+```bash
+uv run -m core.gates outputs/yolo11n-640 gates.limits.min_recall_far=0.6 '~gates.limits.min_precision'
+```
+
+The deployment confidence is `parity.confidence`. Parity and the gates share it.
+
+## Build a release bundle
+
+One command runs all of the above for one target and precision:
+
+```bash
+uv run -m core.release outputs/yolo11n-640 --target onnxruntime --precision int8 --device cpu
+```
+
+It exports and quantizes if needed, checks parity, evaluates, measures the
+quantization cost, runs the gates, and times preprocessing, inference, and
+postprocessing on real test images. Then it writes:
+
+```text
+outputs/yolo11n-640/release/onnxruntime-int8/
+  model.onnx
+  contract.json         input size, letterbox, normalization, colour order, class map, output format
+  model_card.md         generated from the files below
+  parity.json
+  evaluation.json
+  quantization.json
+  gates.json
+  benchmark.json
+  calibration.json      int8 only
+  experiment.json
+  manifest.json         status and a sha256 for every file
+```
+
+`contract.json` is what you implement on the car. `core/deployment.py` is the
+reference implementation. Parity is the proof that it matches the checkpoint.
+
+A failed check still writes the bundle, so you can see why. `manifest.json`
+and the model card say FAIL, and the command exits 1. Do not ship that folder.
+
+`--device cuda` and `--device coreml` use those onnxruntime providers. CUDA
+needs `onnxruntime-gpu` instead of `onnxruntime`. `--target tensorrt` goes
+through onnxruntime's TensorRT provider and needs an NVIDIA GPU. Without it, the
+command stops. It never falls back to CPU and calls that TensorRT. The tests
+only cover the CPU path.
+
+Latency is measured one image at a time on the machine that runs the command.
+Run it on the car's computer to get the car's numbers.
 
 ## Study small-cone failures
 
@@ -336,7 +471,8 @@ uv run python -m tests.cpu_smoke
 ```
 
 The pipeline smoke test builds YOLO11n from its packaged architecture, trains
-for one epoch on generated images, evaluates, benchmarks, and exports a report.
+for one epoch on generated images, exports ONNX, checks parity, quantizes,
+evaluates, runs the gates, benchmarks, and builds a release bundle.
 It downloads nothing. Full FSOCO training and GPU benchmarking are separate
 checks because they require the dataset, model weights, and suitable hardware.
 
@@ -347,10 +483,12 @@ configs/                 Hydra configs
 configs/dataset/         dataset configs
 configs/trainer/         training configs
 configs/logger/          logging configs
+configs/release/         export checks and release settings
 core/data/               dataset logic
 core/trainers/           trainer backends
 core/loggers/            logger integrations
 core/metrics/            metric extraction
+core/deployment.py       the ONNX preprocessing contract and parity checks
 core/train.py            training entrypoint
 ```
 
@@ -366,5 +504,6 @@ That is the place to handle download, conversion, cropping, relabeling, whatever
 3. point `dataset.preprocessed_dir` at your YOLO dataset
 4. align `class_map` with your labels
 5. train
+6. run `uv run -m core.release` before anything goes on the car
 
 That is it.
