@@ -12,6 +12,7 @@ import time
 from pathlib import Path
 from typing import Any, Callable
 
+from core.deployment import runtime_record
 from core.evaluation import sha256_file
 from core.experiments import SCHEMA_VERSION
 
@@ -63,6 +64,11 @@ def benchmark_ultralytics_model(
     if precision not in {"fp32", "fp16"}:
         raise ValueError("precision must be fp32 or fp16")
     checkpoint = checkpoint.resolve()
+    exported = checkpoint.suffix == ".onnx"
+    if exported and precision != "fp32":
+        raise ValueError(
+            "An ONNX file's precision is fixed at export. Benchmark the fp16 or int8 file with --precision fp32."
+        )
     model = (model_factory or YOLO)(str(checkpoint))
     tensor_device = torch.device(f"cuda:{device}" if str(device).isdigit() else device)
     if precision == "fp16" and tensor_device.type not in {"cuda", "mps"}:
@@ -92,7 +98,11 @@ def benchmark_ultralytics_model(
         latencies.append(time.perf_counter() - started)
 
     torch_model = getattr(model, "model", model)
-    parameter_count = sum(parameter.numel() for parameter in torch_model.parameters())
+    parameter_count = (
+        sum(parameter.numel() for parameter in torch_model.parameters())
+        if hasattr(torch_model, "parameters") else None
+    )
+    runtime = runtime_record(checkpoint, device, half=half)
     hardware = {
         "system": platform.system(),
         "machine": platform.machine(),
@@ -114,6 +124,9 @@ def benchmark_ultralytics_model(
         "measured_runs": measured_runs,
     }
     context = {"hardware": hardware, "protocol": protocol}
+    if exported:
+        # PyTorch context IDs stay as they were; exported runtimes get their own.
+        context["runtime"] = runtime
     context_id = hashlib.sha256(
         json.dumps(context, sort_keys=True, separators=(",", ":")).encode()
     ).hexdigest()[:12]
@@ -132,6 +145,7 @@ def benchmark_ultralytics_model(
             "size_bytes": checkpoint.stat().st_size,
         },
         "model": {"parameter_count": parameter_count},
+        "runtime": runtime,
         "hardware": hardware,
         "protocol": protocol,
         "benchmark_context_id": context_id,

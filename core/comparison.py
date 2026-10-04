@@ -13,9 +13,10 @@ import yaml
 FIELDS = [
     "experiment", "architecture", "weights", "seed", "train_imgsz", "train_batch", "epochs",
     "git_commit", "ultralytics_version", "result_type", "evaluation_split", "dataset_fingerprint",
-    "evaluation_context_id", "evaluation_device", "evaluation_batch", "evaluation_imgsz", "accuracy_comparable",
+    "evaluation_context_id", "evaluation_device", "evaluation_batch", "evaluation_imgsz", "evaluation_runtime",
+    "evaluation_runtime_precision", "accuracy_comparable",
     "map50", "map50_95", "precision", "recall", "parameter_count", "model_size_bytes",
-    "benchmark_context_id", "benchmark_system", "benchmark_machine", "benchmark_cpu",
+    "benchmark_context_id", "benchmark_runtime", "benchmark_runtime_precision", "benchmark_system", "benchmark_machine", "benchmark_cpu",
     "benchmark_accelerator", "benchmark_device", "benchmark_precision", "benchmark_batch",
     "benchmark_input_size", "median_latency_ms", "p95_latency_ms", "throughput_images_per_second",
 ]
@@ -37,6 +38,9 @@ def _row(experiment: Path, evaluation: dict, benchmark: dict | None) -> dict[str
     hardware = (benchmark or {}).get("hardware", {})
     timings = (benchmark or {}).get("results", {})
     evaluation_args = evaluation.get("evaluation_args", {})
+    # Records written before runtimes were recorded always came from PyTorch.
+    evaluation_runtime = evaluation.get("runtime") or {"name": "pytorch"}
+    benchmark_runtime = (benchmark or {}).get("runtime") or ({"name": "pytorch"} if benchmark else {})
     return {
         "experiment": experiment.name,
         "architecture": config.get("model", {}).get("name"),
@@ -54,6 +58,8 @@ def _row(experiment: Path, evaluation: dict, benchmark: dict | None) -> dict[str
         "evaluation_device": evaluation_args.get("device"),
         "evaluation_batch": evaluation_args.get("batch"),
         "evaluation_imgsz": evaluation_args.get("imgsz"),
+        "evaluation_runtime": evaluation_runtime.get("name"),
+        "evaluation_runtime_precision": evaluation_runtime.get("precision"),
         "map50": metrics.get("map50"),
         "map50_95": metrics.get("map50_95"),
         "precision": metrics.get("precision"),
@@ -61,6 +67,8 @@ def _row(experiment: Path, evaluation: dict, benchmark: dict | None) -> dict[str
         "parameter_count": model.get("parameter_count"),
         "model_size_bytes": model.get("size_bytes"),
         "benchmark_context_id": (benchmark or {}).get("benchmark_context_id"),
+        "benchmark_runtime": benchmark_runtime.get("name"),
+        "benchmark_runtime_precision": benchmark_runtime.get("precision") or protocol.get("precision"),
         "benchmark_system": hardware.get("system"),
         "benchmark_machine": hardware.get("machine"),
         "benchmark_cpu": hardware.get("cpu"),

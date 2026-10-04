@@ -25,7 +25,7 @@ No notebooks. No clickops. Run the command and train the model.
 
 - trains a YOLO cone detector
 - logs metrics and prediction images during training
-- exports ONNX after training
+- exports ONNX after training and checks it against the checkpoint
 - ships with an FSOCO pipeline so you can get a baseline fast
 - uses Hydra configs, so most changes are one command-line override
 - records enough local metadata to reproduce and compare experiments
@@ -187,6 +187,7 @@ After a run, look here:
 - `outputs/<run_name>/train.log`
 - `outputs/<run_name>/ultralytics_files/weights/best.pt`
 - `outputs/<run_name>/ultralytics_files/weights/last.pt`
+- `outputs/<run_name>/ultralytics_files/weights/best.onnx`
 - `outputs/<run_name>/ultralytics_files/results.csv`
 - `outputs/<run_name>/experiment/config.yaml`
 - `outputs/<run_name>/experiment/metadata.json`
@@ -242,6 +243,41 @@ That writes `comparison.csv` and `comparison.md`. Accuracy rows from different
 dataset fingerprints or evaluation settings are marked non-comparable. Timing
 rows retain a benchmark context ID, and the command warns when the hardware or
 protocol differs.
+
+## Check the exported model
+
+Training exports `best.onnx` and `last.onnx` next to the checkpoints.
+A failed export fails the run. The training record is written first, so the
+checkpoints stay usable.
+
+An exported file is not proof. Check it against the checkpoint it came from:
+
+```bash
+uv run -m core.parity outputs/yolo11n-640 --device cpu
+```
+
+This runs `best.pt` through Ultralytics and `best.onnx` through onnxruntime
+with the plain NumPy and OpenCV preprocessing in `core/deployment.py`. Same
+test images, same thresholds. It reports box deviation in pixels, confidence
+differences, class flips, and boxes only one model found. It exits non-zero
+when a tolerance in `configs/release/default.yaml` is exceeded.
+
+Tolerances are Hydra values:
+
+```bash
+uv run -m core.parity outputs/yolo11n-640 parity.image_count=64 parity.confidence=0.3
+```
+
+Evaluate and benchmark the exported file with the usual commands:
+
+```bash
+uv run -m core.evaluate outputs/yolo11n-640 --model ultralytics_files/weights/best.onnx --device cpu
+uv run -m core.benchmark outputs/yolo11n-640 --model ultralytics_files/weights/best.onnx --device cpu
+```
+
+Both record the runtime they used. The evaluation lands in
+`experiment/evaluations/test_best_onnx.json`. `core.compare` still reads the
+checkpoint's `test.json`.
 
 ## Study small-cone failures
 
@@ -336,7 +372,8 @@ uv run python -m tests.cpu_smoke
 ```
 
 The pipeline smoke test builds YOLO11n from its packaged architecture, trains
-for one epoch on generated images, evaluates, benchmarks, and exports a report.
+for one epoch on generated images, exports ONNX, checks parity, evaluates,
+benchmarks, and exports a report.
 It downloads nothing. Full FSOCO training and GPU benchmarking are separate
 checks because they require the dataset, model weights, and suitable hardware.
 
@@ -347,10 +384,12 @@ configs/                 Hydra configs
 configs/dataset/         dataset configs
 configs/trainer/         training configs
 configs/logger/          logging configs
+configs/release/         export checks and release settings
 core/data/               dataset logic
 core/trainers/           trainer backends
 core/loggers/            logger integrations
 core/metrics/            metric extraction
+core/deployment.py       the ONNX preprocessing contract and parity checks
 core/train.py            training entrypoint
 ```
 

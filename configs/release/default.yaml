@@ -1,0 +1,32 @@
+# Checks that run before an exported model goes to the car.
+# Override any value from the command line, e.g. parity.image_count=64.
+# Every number below is a team-chosen default, not a competition rule.
+
+parity:
+  # Evenly spaced images from the sorted test split.
+  image_count: 32
+  # The confidence the car would use. Both models run slightly below it, so a
+  # score that crosses the threshold is compared instead of counted as a miss.
+  confidence: 0.25
+  confidence_margin: 0.05
+  nms_iou: 0.7
+  max_det: 300
+  # IoU needed to pair a checkpoint box with an exported-model box.
+  match_iou: 0.5
+  # Limits per numeric precision of the exported file.
+  tolerances:
+    fp32:
+      max_box_deviation_px: 1.0
+      max_confidence_difference: 0.01
+      max_class_disagreement_rate: 0.0
+      max_unmatched_rate: 0.01
+    fp16:
+      max_box_deviation_px: 2.0
+      max_confidence_difference: 0.02
+      max_class_disagreement_rate: 0.0
+      max_unmatched_rate: 0.02
+    int8:
+      max_box_deviation_px: 12.0
+      max_confidence_difference: 0.15
+      max_class_disagreement_rate: 0.02
+      max_unmatched_rate: 0.15

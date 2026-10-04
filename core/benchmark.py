@@ -6,7 +6,7 @@ import argparse
 from pathlib import Path
 
 from core.benchmarking import benchmark_ultralytics_model
-from core.evaluate import _checkpoint_path
+from core.evaluate import resolve_model_path
 from core.experiments import write_json
 
 
@@ -14,6 +14,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("experiment_dir", type=Path)
     parser.add_argument("--checkpoint", choices=("best", "last"), default="best")
+    parser.add_argument("--model", type=Path, help="exported model to benchmark instead of the checkpoint")
     parser.add_argument("--device", default="cpu")
     parser.add_argument("--precision", choices=("fp32", "fp16"), default="fp32")
     parser.add_argument("--batch-size", type=int, default=1)
@@ -23,8 +24,9 @@ def main() -> None:
     args = parser.parse_args()
 
     experiment_dir = args.experiment_dir.resolve()
+    model_path = resolve_model_path(experiment_dir, args.checkpoint, args.model)
     result = benchmark_ultralytics_model(
-        checkpoint=_checkpoint_path(experiment_dir, args.checkpoint),
+        checkpoint=model_path,
         device=args.device,
         precision=args.precision,
         batch_size=args.batch_size,
@@ -32,8 +34,9 @@ def main() -> None:
         warmup_runs=args.warmup_runs,
         measured_runs=args.measured_runs,
     )
+    prefix = "" if model_path.suffix == ".pt" else f"{model_path.stem}_{model_path.suffix.lstrip('.')}_"
     filename = (
-        f"{args.device.replace(':', '-')}_{args.precision}_b{args.batch_size}_"
+        f"{prefix}{args.device.replace(':', '-')}_{args.precision}_b{args.batch_size}_"
         f"{args.input_size}_{result['benchmark_context_id']}.json"
     )
     destination = experiment_dir / "experiment" / "benchmarks" / filename

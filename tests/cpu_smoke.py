@@ -15,6 +15,7 @@ from core.benchmarking import benchmark_ultralytics_model
 from core.comparison import collect_comparison_rows, write_comparison
 from core.evaluate import _checkpoint_path, evaluate_experiment
 from core.experiments import write_json
+from core.parity import load_release_settings, run_parity
 from core.studies import evaluate_study, prepare_study
 from core.train import run
 
@@ -71,7 +72,6 @@ def main() -> None:
             "model.weights=yolo11n.yaml",
             f"dataset.preprocessed_dir={dataset_root}",
             f"dataset.raw_dir={temporary_root / 'raw'}",
-            "trainer.export_onnx=false",
             "trainer.args.epochs=1",
             "trainer.args.imgsz=32",
             "trainer.args.batch=2",
@@ -106,6 +106,21 @@ def main() -> None:
         assert csv_path.exists() and markdown_path.exists()
         assert (experiment / "experiment/config.yaml").exists()
         assert (experiment / "ultralytics_files/weights/best.pt").exists()
+
+        onnx_path = experiment / "ultralytics_files/weights/best.onnx"
+        assert onnx_path.exists()
+        # An untrained model scores everything near zero, so compare at a tiny threshold.
+        parity_settings = load_release_settings(
+            overrides=["parity.confidence=0.001", "parity.confidence_margin=0.0005"]
+        )["parity"]
+        parity = run_parity(experiment, onnx_path, parity_settings)
+        assert parity["status"] == "pass", parity["checks"]
+        assert parity["summary"]["reference_detections"] > 0
+        onnx_evaluation = json.loads(evaluate_experiment(
+            experiment, split="test", model=onnx_path, device="cpu", batch=1, imgsz=32
+        ).read_text(encoding="utf-8"))
+        assert onnx_evaluation["runtime"]["name"] == "onnxruntime"
+        assert onnx_evaluation["dataset_fingerprint"] == evaluation["dataset_fingerprint"]
 
         study_dir = temporary_root / "study"
         manifest_path = prepare_study(experiment, study_dir)
