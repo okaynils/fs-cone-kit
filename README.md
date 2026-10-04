@@ -26,6 +26,7 @@ No notebooks. No clickops. Run the command and train the model.
 - trains a YOLO cone detector
 - logs metrics and prediction images during training
 - exports ONNX after training and checks it against the checkpoint
+- quantizes to FP16 and INT8 and reports what that cost
 - ships with an FSOCO pipeline so you can get a baseline fast
 - uses Hydra configs, so most changes are one command-line override
 - records enough local metadata to reproduce and compare experiments
@@ -279,6 +280,31 @@ Both record the runtime they used. The evaluation lands in
 `experiment/evaluations/test_best_onnx.json`. `core.compare` still reads the
 checkpoint's `test.json`.
 
+## Quantize and measure the cost
+
+FP16 halves the file. INT8 shrinks it again. Neither is free. Measure it:
+
+```bash
+uv run -m core.quantize outputs/yolo11n-640 --precision fp16 int8 --device cpu
+```
+
+This writes `best_fp16.onnx` and `best_int8.onnx` next to `best.onnx`,
+evaluates all three on the test split, and reports every metric against the
+fp32 export. The report goes to `experiment/quantization/best.json` and
+`best.md`.
+
+INT8 calibration uses train images only, evenly spaced through the sorted
+split. The list is saved in `best_int8.calibration.json`. Only `Conv` layers are
+quantized. The YOLO head mixes pixel boxes with 0-1 scores, and one INT8 scale
+for both erases the scores.
+
+If `study/small-cones/manifest.json` exists for the same split and passed its
+leakage audit, the report includes the study slices. Small cones are the ones
+you can least afford to lose.
+
+Rows from a different split or different evaluation settings are marked
+non-comparable and get no delta.
+
 ## Study small-cone failures
 
 The first failure study asks whether stronger scale augmentation helps on
@@ -372,8 +398,8 @@ uv run python -m tests.cpu_smoke
 ```
 
 The pipeline smoke test builds YOLO11n from its packaged architecture, trains
-for one epoch on generated images, exports ONNX, checks parity, evaluates,
-benchmarks, and exports a report.
+for one epoch on generated images, exports ONNX, checks parity, quantizes,
+evaluates, benchmarks, and exports a report.
 It downloads nothing. Full FSOCO training and GPU benchmarking are separate
 checks because they require the dataset, model weights, and suitable hardware.
 

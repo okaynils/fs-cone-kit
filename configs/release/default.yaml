@@ -30,3 +30,12 @@ parity:
       max_confidence_difference: 0.15
       max_class_disagreement_rate: 0.02
       max_unmatched_rate: 0.15
+
+quantization:
+  # Evenly spaced images from the sorted train split. Never val or test.
+  calibration_images: 64
+  int8:
+    # The decode head mixes pixel boxes and 0-1 scores; quantizing it erases the scores.
+    op_types: [Conv]
+    per_channel: true
+    calibrate_method: MinMax

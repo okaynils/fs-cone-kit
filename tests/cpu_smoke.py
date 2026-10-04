@@ -16,6 +16,7 @@ from core.comparison import collect_comparison_rows, write_comparison
 from core.evaluate import _checkpoint_path, evaluate_experiment
 from core.experiments import write_json
 from core.parity import load_release_settings, run_parity
+from core.quantize import quantize_experiment
 from core.studies import evaluate_study, prepare_study
 from core.train import run
 
@@ -132,6 +133,16 @@ def main() -> None:
         assert manifest["slices"]["small_cones"]["image_count"] == 1
         assert manifest["slices"]["ordinary"]["image_count"] == 1
         assert study_result.exists() and predictions.exists()
+
+        quantization_path, _ = quantize_experiment(
+            experiment, ["fp16", "int8"], load_release_settings()["quantization"], study_dir=study_dir
+        )
+        quantization = json.loads(quantization_path.read_text(encoding="utf-8"))
+        assert [row["label"] for row in quantization["rows"]] == ["fp32", "fp16", "int8"]
+        assert all(row["accuracy_comparable"] for row in quantization["rows"])
+        assert quantization["rows"][2]["calibration"]["split"] == "train"
+        assert set(quantization["rows"][2]["slices"]) == {"full", "small_cones", "ordinary"}
+
         print("CPU pipeline smoke test passed")
 
 
