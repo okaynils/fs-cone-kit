@@ -46,6 +46,25 @@ def _cpu_name() -> str:
     return platform.processor() or platform.machine()
 
 
+def hardware_record(accelerator: str | None = None) -> dict[str, Any]:
+    import torch
+
+    return {
+        "system": platform.system(),
+        "machine": platform.machine(),
+        "cpu": _cpu_name(),
+        "logical_cpu_count": os.cpu_count(),
+        "accelerator": accelerator,
+        "torch_version": torch.__version__,
+    }
+
+
+def context_id(context: dict[str, Any]) -> str:
+    return hashlib.sha256(
+        json.dumps(context, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()[:12]
+
+
 def benchmark_ultralytics_model(
     checkpoint: Path,
     device: str,
@@ -103,17 +122,10 @@ def benchmark_ultralytics_model(
         if hasattr(torch_model, "parameters") else None
     )
     runtime = runtime_record(checkpoint, device, half=half)
-    hardware = {
-        "system": platform.system(),
-        "machine": platform.machine(),
-        "cpu": _cpu_name(),
-        "logical_cpu_count": os.cpu_count(),
-        "accelerator": (
-            torch.cuda.get_device_name(tensor_device)
-            if tensor_device.type == "cuda" else "Apple Metal" if tensor_device.type == "mps" else None
-        ),
-        "torch_version": torch.__version__,
-    }
+    hardware = hardware_record(
+        torch.cuda.get_device_name(tensor_device)
+        if tensor_device.type == "cuda" else "Apple Metal" if tensor_device.type == "mps" else None
+    )
     protocol = {
         "method": "ultralytics_predict_synthetic_tensor",
         "device": device,
@@ -127,9 +139,6 @@ def benchmark_ultralytics_model(
     if exported:
         # PyTorch context IDs stay as they were; exported runtimes get their own.
         context["runtime"] = runtime
-    context_id = hashlib.sha256(
-        json.dumps(context, sort_keys=True, separators=(",", ":")).encode()
-    ).hexdigest()[:12]
 
     return {
         "schema_version": SCHEMA_VERSION,
@@ -148,7 +157,30 @@ def benchmark_ultralytics_model(
         "runtime": runtime,
         "hardware": hardware,
         "protocol": protocol,
-        "benchmark_context_id": context_id,
+        "benchmark_context_id": context_id(context),
         "results": summarize_latencies(latencies, batch_size),
         "latencies_ms": [value * 1000 for value in latencies],
     }
+
+
+def time_pipeline(detector: Any, images: list[Any], warmup_runs: int, measured_runs: int) -> dict[str, Any]:
+    """Time preprocessing, inference, and postprocessing separately on real images, one at a time."""
+    if not images or measured_runs < 1 or warmup_runs < 0:
+        raise ValueError("Timing needs images and at least one measured run")
+    for index in range(warmup_runs):
+        detector.predict(images[index % len(images)])
+    stages: dict[str, list[float]] = {"preprocess": [], "inference": [], "postprocess": [], "total": []}
+    for index in range(measured_runs):
+        image = images[index % len(images)]
+        started = time.perf_counter()
+        tensor = detector.preprocess(image)
+        prepared = time.perf_counter()
+        output = detector.infer(tensor)
+        inferred = time.perf_counter()
+        detector.postprocess(output, image.shape[:2])
+        finished = time.perf_counter()
+        stages["preprocess"].append(prepared - started)
+        stages["inference"].append(inferred - prepared)
+        stages["postprocess"].append(finished - inferred)
+        stages["total"].append(finished - started)
+    return {name: summarize_latencies(values, batch_size=1) for name, values in stages.items()}

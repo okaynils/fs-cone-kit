@@ -39,6 +39,10 @@ quantization:
     op_types: [Conv]
     per_channel: true
     calibrate_method: MinMax
+  # Accuracy a quantized release may lose against the fp32 export, on the test split.
+  limits:
+    max_map50_95_drop: 0.02
+    max_recall_drop: 0.02
 
 gates:
   # Pass/fail limits for a release. Every limit here is team-chosen.
@@ -64,3 +68,9 @@ gates:
     min_recall_near: 0.9
     max_color_confusion_rate: 0.02
     max_false_positives_per_image: 1.0
+
+benchmark:
+  # Real test images, one at a time, through the contract in core/deployment.py.
+  image_count: 32
+  warmup_runs: 10
+  measured_runs: 200

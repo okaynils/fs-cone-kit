@@ -156,6 +156,36 @@ def runtime_record(
     }
 
 
+DEVICE_PROVIDERS = {
+    "cpu": "CPUExecutionProvider",
+    "cuda": "CUDAExecutionProvider",
+    "coreml": "CoreMLExecutionProvider",
+}
+
+
+def target_providers(target: str, device: str = "cpu", precision: str = "fp32") -> list[Any]:
+    """onnxruntime providers for a release target. Refuse rather than fall back."""
+    import onnxruntime
+
+    available = onnxruntime.get_available_providers()
+    if target == "tensorrt":
+        if "TensorrtExecutionProvider" not in available:
+            raise RuntimeError(
+                "The tensorrt target needs onnxruntime-gpu built with TensorRT, and an NVIDIA GPU. "
+                f"This environment only offers {available}. No TensorRT numbers were produced."
+            )
+        options = {"trt_fp16_enable": precision == "fp16", "trt_int8_enable": precision == "int8"}
+        return [("TensorrtExecutionProvider", options), "CUDAExecutionProvider", "CPUExecutionProvider"]
+    if target != "onnxruntime":
+        raise ValueError(f"Unknown target {target!r}; use onnxruntime or tensorrt")
+    if device not in DEVICE_PROVIDERS:
+        raise ValueError(f"Unknown device {device!r} for onnxruntime; use one of {sorted(DEVICE_PROVIDERS)}")
+    provider = DEVICE_PROVIDERS[device]
+    if provider not in available:
+        raise RuntimeError(f"{provider} is not available here; this environment offers {available}")
+    return [provider] if provider == "CPUExecutionProvider" else [provider, "CPUExecutionProvider"]
+
+
 class OnnxDetector:
     """Contract-only inference: onnxruntime, NumPy, and OpenCV. No Ultralytics."""
 
@@ -170,9 +200,14 @@ class OnnxDetector:
         import onnxruntime
 
         self.model_path = Path(model_path).resolve()
-        self.session = onnxruntime.InferenceSession(
-            str(self.model_path), providers=providers or ["CPUExecutionProvider"]
-        )
+        providers = providers or ["CPUExecutionProvider"]
+        self.session = onnxruntime.InferenceSession(str(self.model_path), providers=providers)
+        requested = providers[0][0] if isinstance(providers[0], tuple) else providers[0]
+        if self.session.get_providers()[0] != requested:
+            # onnxruntime quietly falls back to CPU when a provider fails to load.
+            raise RuntimeError(
+                f"Asked for {requested}, but onnxruntime is running {self.session.get_providers()[0]}"
+            )
         model_input = self.session.get_inputs()[0]
         self.input_name = model_input.name
         self.input_dtype = np.float16 if model_input.type == "tensor(float16)" else np.float32

@@ -18,6 +18,7 @@ from core.experiments import write_json
 from core.gates import run_gates
 from core.parity import load_release_settings, run_parity
 from core.quantize import quantize_experiment
+from core.release import release_experiment
 from core.studies import evaluate_study, prepare_study
 from core.train import run
 
@@ -149,6 +150,28 @@ def main() -> None:
         assert len(gates["checks"]) == len(gates["limits"])
         assert gates["metrics"]["truths"] == 2
 
+        # An untrained model meets no real limit, and its near-tied class scores
+        # flip under INT8. This proves the pipeline, not the model.
+        release_settings = load_release_settings(overrides=[
+            "parity.confidence=0.001", "parity.confidence_margin=0.0005",
+            "parity.tolerances.int8.max_class_disagreement_rate=1.0",
+            "benchmark.warmup_runs=1", "benchmark.measured_runs=3",
+        ])
+        release_settings["gates"]["limits"] = {}
+        bundle, result = release_experiment(
+            experiment, "onnxruntime", "int8", release_settings, study_dir=study_dir
+        )
+        assert result["status"] == "pass", result["checks"]
+        files = {path.name for path in bundle.iterdir()}
+        assert files == {
+            "model.onnx", "contract.json", "parity.json", "evaluation.json", "quantization.json",
+            "gates.json", "benchmark.json", "experiment.json", "calibration.json",
+            "model_card.md", "manifest.json",
+        }, files
+        contract = json.loads((bundle / "contract.json").read_text(encoding="utf-8"))
+        assert contract["input"]["shape"] == [1, 3, 32, 32]
+        benchmark = json.loads((bundle / "benchmark.json").read_text(encoding="utf-8"))
+        assert set(benchmark["stages"]) == {"preprocess", "inference", "postprocess", "total"}
         print("CPU pipeline smoke test passed")
 
 

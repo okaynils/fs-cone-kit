@@ -28,6 +28,7 @@ No notebooks. No clickops. Run the command and train the model.
 - exports ONNX after training and checks it against the checkpoint
 - quantizes to FP16 and INT8 and reports what that cost
 - gates a release on recall by cone size, colour swaps, and false positives
+- writes a release bundle with the model, its preprocessing contract, and a model card
 - ships with an FSOCO pipeline so you can get a baseline fast
 - uses Hydra configs, so most changes are one command-line override
 - records enough local metadata to reproduce and compare experiments
@@ -196,6 +197,7 @@ After a run, look here:
 - `outputs/<run_name>/experiment/dataset.json`
 - `outputs/<run_name>/experiment/splits.json`
 - `outputs/<run_name>/experiment/training.json`
+- `outputs/<run_name>/release/<target>-<precision>/`
 
 The WandB logger also logs side-by-side ground truth vs prediction images from validation samples.
 
@@ -334,6 +336,48 @@ uv run -m core.gates outputs/yolo11n-640 gates.limits.min_recall_far=0.6 '~gates
 
 The deployment confidence is `parity.confidence`. Parity and the gates share it.
 
+## Build a release bundle
+
+One command runs all of the above for one target and precision:
+
+```bash
+uv run -m core.release outputs/yolo11n-640 --target onnxruntime --precision int8 --device cpu
+```
+
+It exports and quantizes if needed, checks parity, evaluates, measures the
+quantization cost, runs the gates, and times preprocessing, inference, and
+postprocessing on real test images. Then it writes:
+
+```text
+outputs/yolo11n-640/release/onnxruntime-int8/
+  model.onnx
+  contract.json         input size, letterbox, normalization, colour order, class map, output format
+  model_card.md         generated from the files below
+  parity.json
+  evaluation.json
+  quantization.json
+  gates.json
+  benchmark.json
+  calibration.json      int8 only
+  experiment.json
+  manifest.json         status and a sha256 for every file
+```
+
+`contract.json` is what you implement on the car. `core/deployment.py` is the
+reference implementation. Parity is the proof that it matches the checkpoint.
+
+A failed check still writes the bundle, so you can see why. `manifest.json`
+and the model card say FAIL, and the command exits 1. Do not ship that folder.
+
+`--device cuda` and `--device coreml` use those onnxruntime providers. CUDA
+needs `onnxruntime-gpu` instead of `onnxruntime`. `--target tensorrt` goes
+through onnxruntime's TensorRT provider and needs an NVIDIA GPU. Without it, the
+command stops. It never falls back to CPU and calls that TensorRT. The tests
+only cover the CPU path.
+
+Latency is measured one image at a time on the machine that runs the command.
+Run it on the car's computer to get the car's numbers.
+
 ## Study small-cone failures
 
 The first failure study asks whether stronger scale augmentation helps on
@@ -428,7 +472,7 @@ uv run python -m tests.cpu_smoke
 
 The pipeline smoke test builds YOLO11n from its packaged architecture, trains
 for one epoch on generated images, exports ONNX, checks parity, quantizes,
-evaluates, runs the gates, benchmarks, and exports a report.
+evaluates, runs the gates, benchmarks, and builds a release bundle.
 It downloads nothing. Full FSOCO training and GPU benchmarking are separate
 checks because they require the dataset, model weights, and suitable hardware.
 
@@ -460,5 +504,6 @@ That is the place to handle download, conversion, cropping, relabeling, whatever
 3. point `dataset.preprocessed_dir` at your YOLO dataset
 4. align `class_map` with your labels
 5. train
+6. run `uv run -m core.release` before anything goes on the car
 
 That is it.
