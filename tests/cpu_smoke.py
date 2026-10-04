@@ -15,6 +15,7 @@ from core.benchmarking import benchmark_ultralytics_model
 from core.comparison import collect_comparison_rows, write_comparison
 from core.evaluate import _checkpoint_path, evaluate_experiment
 from core.experiments import write_json
+from core.gates import run_gates
 from core.parity import load_release_settings, run_parity
 from core.quantize import quantize_experiment
 from core.studies import evaluate_study, prepare_study
@@ -142,6 +143,11 @@ def main() -> None:
         assert all(row["accuracy_comparable"] for row in quantization["rows"])
         assert quantization["rows"][2]["calibration"]["split"] == "train"
         assert set(quantization["rows"][2]["slices"]) == {"full", "small_cones", "ordinary"}
+
+        gates = run_gates(experiment, onnx_path, load_release_settings()["gates"])
+        assert set(gates["metrics"]["by_band"]) == {"far", "mid", "near"}
+        assert len(gates["checks"]) == len(gates["limits"])
+        assert gates["metrics"]["truths"] == 2
 
         print("CPU pipeline smoke test passed")
 

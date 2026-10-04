@@ -44,6 +44,7 @@ def run_parity(
     settings: dict[str, Any],
     checkpoint: str = "best",
     device: str = "cpu",
+    providers: list[Any] | None = None,
 ) -> dict[str, Any]:
     experiment_dir = experiment_dir.resolve()
     _, dataset_yaml, dataset_info = load_recorded_dataset(experiment_dir, "test")
@@ -66,7 +67,11 @@ def run_parity(
 
     run_confidence = max(0.0, settings["confidence"] - settings["confidence_margin"])
     detector = OnnxDetector(
-        model_path, confidence=run_confidence, iou=settings["nms_iou"], max_det=settings["max_det"]
+        model_path,
+        providers=providers,
+        confidence=run_confidence,
+        iou=settings["nms_iou"],
+        max_det=settings["max_det"],
     )
     candidate = {name: detector.predict(image) for name, image in images.items()}
     reference = reference_detections(
@@ -121,7 +126,8 @@ def print_checks(title: str, checks: list[dict[str, Any]]) -> None:
     print(title)
     for check in checks:
         mark = "pass" if check["passed"] else "FAIL"
-        print(f"  {mark}  {check['name']}: {check['value']:.4g} (limit {check['limit']:.4g})")
+        value = "no data" if check["value"] is None else f"{check['value']:.4g}"
+        print(f"  {mark}  {check['name']}: {value} (limit {check['limit']:.4g})")
         if check.get("note"):
             print(f"        {check['note']}")
 

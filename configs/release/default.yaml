@@ -39,3 +39,28 @@ quantization:
     op_types: [Conv]
     per_channel: true
     calibrate_method: MinMax
+
+gates:
+  # Pass/fail limits for a release. Every limit here is team-chosen.
+  # None of them is taken from the FSG rules. Tune them to your car.
+  confidence: ${parity.confidence}
+  nms_iou: ${parity.nms_iou}
+  max_det: ${parity.max_det}
+  match_iou: 0.5
+  # Box height / image height. A stand-in for distance, not a measurement.
+  size_bands:
+    far: [0.0, 0.04]
+    mid: [0.04, 0.12]
+    near: [0.12, 1.0]
+  # The pair whose swap sends the planner the wrong way.
+  color_classes: [blue_cone, yellow_cone]
+  # min_<metric> or max_<metric>. Metrics: recall, precision,
+  # false_positives_per_image, color_confusion_rate, recall_<band>, precision_<band>.
+  limits:
+    min_recall: 0.7
+    min_precision: 0.8
+    min_recall_far: 0.4
+    min_recall_mid: 0.8
+    min_recall_near: 0.9
+    max_color_confusion_rate: 0.02
+    max_false_positives_per_image: 1.0

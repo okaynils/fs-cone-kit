@@ -27,6 +27,7 @@ No notebooks. No clickops. Run the command and train the model.
 - logs metrics and prediction images during training
 - exports ONNX after training and checks it against the checkpoint
 - quantizes to FP16 and INT8 and reports what that cost
+- gates a release on recall by cone size, colour swaps, and false positives
 - ships with an FSOCO pipeline so you can get a baseline fast
 - uses Hydra configs, so most changes are one command-line override
 - records enough local metadata to reproduce and compare experiments
@@ -305,6 +306,34 @@ you can least afford to lose.
 Rows from a different split or different evaluation settings are marked
 non-comparable and get no delta.
 
+## Gate a release
+
+mAP averages over confidences the car never uses. The gates look at one
+confidence, the one you deploy with:
+
+```bash
+uv run -m core.gates outputs/yolo11n-640 --model ultralytics_files/weights/best_int8.onnx
+```
+
+It runs every test image through the exported model and reports:
+
+- recall and precision by box-size band: `far`, `mid`, `near`
+- how often blue and yellow cones get swapped
+- false positives per image
+
+Bands use box height divided by image height. That is a stand-in for distance,
+not a measurement.
+
+The command exits non-zero when a limit in `configs/release/default.yaml`
+fails. The defaults are a starting point I picked. None of them comes from
+the FSG rules. Set your own, or drop one with `~`:
+
+```bash
+uv run -m core.gates outputs/yolo11n-640 gates.limits.min_recall_far=0.6 '~gates.limits.min_precision'
+```
+
+The deployment confidence is `parity.confidence`. Parity and the gates share it.
+
 ## Study small-cone failures
 
 The first failure study asks whether stronger scale augmentation helps on
@@ -399,7 +428,7 @@ uv run python -m tests.cpu_smoke
 
 The pipeline smoke test builds YOLO11n from its packaged architecture, trains
 for one epoch on generated images, exports ONNX, checks parity, quantizes,
-evaluates, benchmarks, and exports a report.
+evaluates, runs the gates, benchmarks, and exports a report.
 It downloads nothing. Full FSOCO training and GPU benchmarking are separate
 checks because they require the dataset, model weights, and suitable hardware.
 
